@@ -10,6 +10,15 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import re
 
+def load_token():
+    base64_token = os.environ.get("GMAIL_TOKEN_BASE64")
+    if base64_token:
+        with open("gmail_token.json", "wb") as f:
+            f.write(base64.b64decode(base64_token))
+    return "gmail_token.json"
+
+GMAIL_TOKEN = load_token()
+
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -21,7 +30,6 @@ SCOPES = [
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/calendar.events'
 ]
-GMAIL_TOKEN = 'gmail_token.json'
 
 def get_gmail_service():
     creds = Credentials.from_authorized_user_file(GMAIL_TOKEN, SCOPES)
