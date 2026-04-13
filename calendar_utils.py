@@ -7,7 +7,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.events']
 
 # 1️⃣ Create Calendar service
 def get_calendar_service():
-    creds = Credentials.from_authorized_user_file('/home/thaehh/gmail_token.json', SCOPES)
+    creds = Credentials.from_authorized_user_file('gmail_token.json', SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
     return build('calendar', 'v3', credentials=creds)

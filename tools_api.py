@@ -77,6 +77,52 @@ def send_email():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
+@app.route('/email_detail', methods=['GET'])
+def email_detail():
+    try:
+        msg_id = request.args.get('id')
+        if not msg_id:
+            return jsonify({"success": False, "error": "Missing email id"})
+
+        service = get_gmail_service()
+        msg = service.users().messages().get(
+            userId='me',
+            id=msg_id,
+            format='full'
+        ).execute()
+
+        payload = msg.get('payload', {})
+
+        def extract_body(parts):
+            for part in parts:
+                if 'parts' in part:
+                    body = extract_body(part['parts'])
+                    if body:
+                        return body
+                elif part.get('mimeType') == 'text/plain':
+                    data = part.get('body', {}).get('data')
+                    if data:
+                        return base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+            return ""
+
+        body = ""
+
+        if 'parts' in payload:
+            body = extract_body(payload['parts'])
+        else:
+            data = payload.get('body', {}).get('data')
+            if data:
+                body = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
+
+        return jsonify({
+            "success": True,
+            "id": msg_id,
+            "body": body if body else "[No readable content]"
+        })
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
 # --- CALENDAR ROUTES ---
 @app.route('/list_events', methods=['GET'])
 def list_events():
