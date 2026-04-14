@@ -8,6 +8,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from calendar_utils import add_calendar_event, list_calendar_events
+from nemoclaw_router import route_command
 # ----------------------------
 # CONFIG
 # ----------------------------
@@ -139,20 +140,33 @@ async def detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Usage: /detail 1")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
-    if 'send' in text:
-        await update.message.reply_text("📧 Use /send to@email.com | Subject | Body")
-    elif any(word in text for word in ['read', 'check', 'inbox']):
-        await read(update, context)
-    else:
-        await update.message.reply_text(
-            "🤖 Commands:\n"
-            "/read - Check latest emails\n"
-            "/detail 1 - View email content\n"
-            "/send - Send an email\n"
-            "/events - Check events\n"
-            "/addevent - Add event to calendar"
-        )
+    user_text = update.message.text
+
+    try:
+        result = route_command(user_text)
+
+        # If emails
+        if result.get("emails"):
+            reply = "📥 Emails:\n\n"
+            for e in result["emails"]:
+                reply += f"📧 {e['subject']}\nFrom: {e['from']}\n\n"
+            await update.message.reply_text(reply)
+
+        # If events
+        elif result.get("events"):
+            reply = "📅 Events:\n\n"
+            for e in result["events"]:
+                reply += f"{e['title']} - {e['start']}\n"
+            await update.message.reply_text(reply)
+
+        else:
+            await update.message.reply_text(str(result))
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+
 async def addevent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         text = ' '.join(context.args)
