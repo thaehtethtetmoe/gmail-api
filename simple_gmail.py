@@ -9,6 +9,11 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from calendar_utils import add_calendar_event, list_calendar_events
 from nemoclaw_router import route_command
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+import re
 # ----------------------------
 # CONFIG
 # ----------------------------
@@ -96,6 +101,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/send to@email.com | Subject | Body - Send email\n"
         "/events - read events\n"
         "/addevent Title | YYYY-MM-DD HH:MM | YYYY-MM-DD HH:MM "
+        "/daily - Get your daily briefing"
     )
 
 async def read(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -188,25 +194,144 @@ async def events(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not events:
             await update.message.reply_text("📭 No upcoming events found!")
             return
+
         reply = "📅 Upcoming events:\n\n"
+ 
+        now = datetime.now(ZoneInfo('Asia/Singapore'))  
+       
         for idx, e in enumerate(events):
             start_raw = e['start'].get('dateTime', e['start'].get('date'))
             summary = e.get('summary', 'No Title')
-            # Format datetime nicely
-            if 'T' in start_raw:
-               from datetime import datetime
-               from zoneinfo import ZoneInfo
-               import re
-               # Remove timezone offset before parsing
-               clean_dt = re.sub(r'Z$', '+00:00', start_raw)
-               dt = datetime.fromisoformat(clean_dt)
-               dt_sg = dt.astimezone(ZoneInfo('Asia/Singapore'))
-               start_formatted = dt_sg.strftime("%d %b %Y, %I:%M %p")
-            else:
-               start_formatted = start_raw
-            reply += f"{idx+1}. {summary}\n⏰ {start_formatted}\n\n"
+
+            if 'T' not in start_raw:
+               continue
+                       
+            clean_dt = re.sub(r'Z$', '+00:00', start_raw)
+            dt = datetime.fromisoformat(clean_dt).astimezone(ZoneInfo('Asia/Singapore'))
+
+            # ✅ FILTER PAST EVENTS
+            if dt < now:
+                continue
+
+            start_formatted = dt.strftime("%d %b %Y, %I:%M %p")
+            reply += f"{summary}\n⏰ {start_formatted}\n\n"
 
         await update.message.reply_text(reply)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+# ----------------------------
+# NOTIFICATION FUNCTIONS
+# ----------------------------
+notified_events = set()  # track already notified events
+
+async def check_and_notify(bot):
+    try:
+        events = list_calendar_events(20)
+        now = datetime.now(ZoneInfo('Asia/Singapore'))
+
+        for e in events:
+            event_id = e.get('id', '')
+            start_raw = e['start'].get('dateTime', e['start'].get('date'))
+            summary = e.get('summary', 'No Title')
+
+            if 'T' not in start_raw:
+                continue
+
+            clean_dt = re.sub(r'Z$', '+00:00', start_raw)
+            event_time = datetime.fromisoformat(clean_dt).astimezone(ZoneInfo('Asia/Singapore'))
+            diff = event_time - now
+            minutes_left = diff.total_seconds() / 60
+
+            # 12 hour reminder (between 719 and 721 minutes)
+            key_12h = f"{event_id}_12h"
+            if 719 <= minutes_left <= 721 and key_12h not in notified_events:
+                notified_events.add(key_12h)
+                msg = (f"⏰ 12-Hour Reminder!\n\n"
+                       f"📅 {summary}\n"
+                       f"🕐 {event_time.strftime('%d %b %Y, %I:%M %p')}\n\n"
+                       f"You have 12 hours until this event!")
+                await bot.send_message(chat_id=os.environ.get('TELEGRAM_CHAT_ID'), text=msg)
+
+            # 1 hour reminder (between 59 and 61 minutes)
+            key_1h = f"{event_id}_1h"
+            if 55 <= minutes_left <= 65 and key_1h not in notified_events:
+                notified_events.add(key_1h)
+                msg = (f"🔔 1-Hour Reminder!\n\n"
+                       f"📅 {summary}\n"
+                       f"🕐 {event_time.strftime('%d %b %Y, %I:%M %p')}\n\n"
+                       f"Your event starts in 1 hour!")
+                await bot.send_message(chat_id=os.environ.get('TELEGRAM_CHAT_ID'), text=msg)
+
+            # 30 minute reminder (between 29 and 31 minutes)
+            key_30 = f"{event_id}_30"
+            if 25 <= minutes_left <= 35 and key_30 not in notified_events:
+                notified_events.add(key_30)
+                msg = (f"🔔 30-Minute Reminder!\n\n"
+                       f"📅 {summary}\n"
+                       f"🕐 {event_time.strftime('%d %b %Y, %I:%M %p')}\n\n"
+                       f"Your event starts in 30 minutes!")
+                await bot.send_message(chat_id=os.environ.get('TELEGRAM_CHAT_ID'), text=msg)  
+    except Exception as e:
+        print(f"Notification error: {e}")
+
+async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        reply = "🌅 *Your Daily Briefing*\n\n"
+
+        # 📧 Emails
+        emails = read_emails(3)
+        if emails:
+            reply += "📧 *Latest Emails:*\n"
+            for e in emails:
+                reply += f"- {e['text'].splitlines()[1]}\n"
+        else:
+            reply += "📧 No new emails\n"
+
+        reply += "\n"
+
+        # 📅 Events
+        events = list_calendar_events(5)
+        today_events = []
+        now = datetime.now(ZoneInfo('Asia/Singapore'))
+
+        for e in events:
+            start_raw = e['start'].get('dateTime', e['start'].get('date'))
+            if 'T' in start_raw:
+                clean_dt = re.sub(r'Z$', '+00:00', start_raw)
+                dt = datetime.fromisoformat(clean_dt).astimezone(ZoneInfo('Asia/Singapore'))
+
+                if dt.date() == now.date():
+                    today_events.append((e.get('summary', 'No Title'), dt))
+
+        if today_events:
+            reply += "📅 *Today's Events:*\n"
+            for title, dt in today_events:
+                reply += f"- {title} at {dt.strftime('%I:%M %p')}\n"
+        else:
+            reply += "📅 No events today\n"
+
+        reply += "\n"
+
+        # ⏰ Next event
+        upcoming = []
+        for e in events:
+            start_raw = e['start'].get('dateTime', e['start'].get('date'))
+            if 'T' in start_raw:
+                clean_dt = re.sub(r'Z$', '+00:00', start_raw)
+                dt = datetime.fromisoformat(clean_dt).astimezone(ZoneInfo('Asia/Singapore'))
+                if dt > now:
+                    upcoming.append((e.get('summary', 'No Title'), dt))
+
+        if upcoming:
+            next_event = sorted(upcoming, key=lambda x: x[1])[0]
+            reply += f"⏰ *Next Event:*\n{next_event[0]} at {next_event[1].strftime('%d %b %I:%M %p')}\n\n"
+
+        # 🧠 Smart summary
+        reply += f"🧠 You have {len(today_events)} events today and {len(emails)} recent emails."
+
+        await update.message.reply_text(reply, parse_mode="Markdown")
+
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
@@ -222,6 +347,21 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CommandHandler('addevent', addevent))
     app.add_handler(CommandHandler('events', events))
+    app.add_handler(CommandHandler('daily', daily))
+    # Start notification scheduler
+    scheduler = AsyncIOScheduler(timezone="Asia/Singapore")
+   
+    async def start_scheduler(app): 
+        scheduler.add_job(
+           check_and_notify,
+           'interval',
+           minutes=1,
+           args=[app.bot]
+         )
+        scheduler.start()
+        print("scheduler started")
+    app.post_init = start_scheduler
+
     print("🤖 Bot is running...")
     app.run_polling()
 
