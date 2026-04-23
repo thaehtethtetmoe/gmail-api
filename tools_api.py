@@ -6,7 +6,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from calendar_utils import add_calendar_event, list_calendar_events
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import re
 
@@ -159,6 +159,16 @@ def add_event():
             "server_time": datetime.now(ZoneInfo('Asia/Singapore')).strftime("%H:%M") })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+@app.route('/today', methods=['GET'])
+def get_today():
+    now = datetime.now(ZoneInfo('Asia/Singapore'))
+    return jsonify({
+        "today": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "day": now.strftime("%A"),
+        "tomorrow": (now + timedelta(days=1)).strftime("%Y-%m-%d")
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
