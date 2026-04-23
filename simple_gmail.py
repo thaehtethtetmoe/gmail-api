@@ -102,6 +102,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/events - read events\n"
         "/addevent Title | YYYY-MM-DD HH:MM | YYYY-MM-DD HH:MM "
         "/daily - Get your daily briefing"
+        "/reply 1 - Generate reply"
+        "/sendreply - Send generated reply"     
     )
 
 async def read(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -166,7 +168,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(reply)
 
         else:
-            await update.message.reply_text(str(result))
+            # await update.message.reply_text(str(result)
+            if "plan" in result:
+                final_output = None
+
+                for step in result["plan"]:
+                action = step.get("action")
+                params = step.get("params", {})
+
+            if action == "add_event":
+                link = add_calendar_event(**params)
+                final_output = f"✅ Event added: {params.get('title')}"
+
+            elif action == "list_events":
+                events = list_calendar_events()
+                reply = "📅 Upcoming events:\n\n"
+
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                import re
+
+                now = datetime.now(ZoneInfo('Asia/Singapore'))
+
+                for e in events:
+                   start_raw = e['start'].get('dateTime', e['start'].get('date'))
+                   summary = e.get('summary', 'No Title')
+
+                   if 'T' not in start_raw:
+                     continue
+
+                   clean_dt = re.sub(r'Z$', '+00:00', start_raw)
+                   dt = datetime.fromisoformat(clean_dt).astimezone(ZoneInfo('Asia/Singapore')) 
+                   # ✅ FILTER OUT PAST EVENTS
+                   if dt < now:
+                     continue
+
+                   reply += f"{summary} - {dt.strftime('%d %b %Y, %I:%M %p')}\n"
+
+                 final_output = reply
+
+    await update.message.reply_text(final_output)
+                      
 
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -335,6 +377,64 @@ async def daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
+#reply email 
+async def reply_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        index = int(context.args[0]) - 1
+        emails = context.user_data.get('emails')
+
+        if not emails or index >= len(emails):
+            await update.message.reply_text("❌ Use /read first.")
+            return
+
+        selected = emails[index]
+
+        # extract info
+        sender = selected['text'].split("From: ")[1].split("\n")[0]
+        subject = selected['text'].split("Subject: ")[1].split("\n")[0]
+
+        # ✨ simple AI-style reply (you can upgrade later)
+        suggested_reply = f"""Hi,
+
+Thanks for your message regarding "{subject}". 
+I will get back to you shortly.
+
+Best regards."""
+
+        # save draft in memory
+        context.user_data['draft_reply'] = {
+            "to": sender,
+            "subject": f"Re: {subject}",
+            "body": suggested_reply
+        }
+
+        await update.message.reply_text(
+            f"📧 From: {sender}\n"
+            f"Subject: {subject}\n\n"
+            f"✍️ Suggested Reply:\n{suggested_reply}\n\n"
+            f"Type /sendreply to send."
+        )
+
+    except:
+        await update.message.reply_text("❌ Usage: /reply 1") 
+
+async def sendreply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        draft = context.user_data.get('draft_reply')
+
+        if not draft:
+            await update.message.reply_text("❌ No draft found.")
+            return
+
+        send_email(draft['to'], draft['subject'], draft['body'])
+
+        await update.message.reply_text("✅ Reply sent!")
+
+        context.user_data['draft_reply'] = None
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
 # ----------------------------
 # MAIN
 # ----------------------------
@@ -348,6 +448,8 @@ def main():
     app.add_handler(CommandHandler('addevent', addevent))
     app.add_handler(CommandHandler('events', events))
     app.add_handler(CommandHandler('daily', daily))
+    app.add_handler(CommandHandler('reply', reply_email))
+    app.add_handler(CommandHandler('sendreply', sendreply))
     # Start notification scheduler
     scheduler = AsyncIOScheduler(timezone="Asia/Singapore")
    

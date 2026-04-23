@@ -10,8 +10,11 @@ def get_calendar_service():
     creds = Credentials.from_authorized_user_file('gmail_token.json', SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
+    # return build('calendar', 'v3', credentials=creds)
+    # save refreshed token back to file 
+    with open('gmail_token.json', 'w') as f: 
+        f.write(creds.to_json())
     return build('calendar', 'v3', credentials=creds)
-
 # 2️⃣ Add event to calendar
 def add_calendar_event(summary, start_time, end_time):
     service = get_calendar_service()
