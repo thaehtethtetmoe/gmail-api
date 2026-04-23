@@ -155,7 +155,8 @@ def add_event():
         start_dt = data['start'].replace(" ", "T") + ":00"
         end_dt = data['end'].replace(" ", "T") + ":00"
         link = add_calendar_event(title, start_dt, end_dt)
-        return jsonify({"success": True, "link": link, "title": title})
+        return jsonify({"success": True, "link": link, "title": title,"server_date": datetime.now(ZoneInfo('Asia/Singapore')).strftime("%Y-%m-%d"),
+            "server_time": datetime.now(ZoneInfo('Asia/Singapore')).strftime("%H:%M") })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
 
