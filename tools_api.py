@@ -35,6 +35,9 @@ def get_gmail_service():
     creds = Credentials.from_authorized_user_file(GMAIL_TOKEN, SCOPES)
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
+        # ✅ Add this — save refreshed token
+        with open(GMAIL_TOKEN, 'w') as f:
+            f.write(creds.to_json())   
     return build('gmail', 'v1', credentials=creds)
 
 # --- EMAIL ROUTES ---
