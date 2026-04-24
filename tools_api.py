@@ -9,6 +9,7 @@ from calendar_utils import add_calendar_event, list_calendar_events
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import re
+import json
 
 def load_token():
     base64_token = os.environ.get("GMAIL_TOKEN_BASE64")
@@ -29,6 +30,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.send',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/calendar.events'
+    'https://www.googleapis.com/auth/tasks' 
 ]
 
 def get_gmail_service():
@@ -172,6 +174,111 @@ def get_today():
         "day": now.strftime("%A"),
         "tomorrow": (now + timedelta(days=1)).strftime("%Y-%m-%d")
     })
+
+# --- GOOGLE TASKS ROUTES ---
+def get_tasks_service():
+    creds = Credentials.from_authorized_user_file(GMAIL_TOKEN, SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+        with open(GMAIL_TOKEN, 'w') as f:
+            f.write(creds.to_json())
+    return build('tasks', 'v1', credentials=creds)
+
+@app.route('/todos', methods=['GET'])
+def get_todos():
+    try:
+        service = get_tasks_service()
+        # Get default task list
+        tasklists = service.tasklists().list().execute()
+        tasklist_id = tasklists['items'][0]['id']
+        # Get tasks
+        tasks = service.tasks().list(
+            tasklist=tasklist_id,
+            showCompleted=True
+        ).execute()
+        items = tasks.get('items', [])
+        formatted = []
+        for t in items:
+            formatted.append({
+                "id": t['id'],
+                "task": t.get('title', ''),
+                "done": t.get('status') == 'completed',
+                "due": t.get('due', None)
+            })
+        return jsonify({"success": True, "todos": formatted})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/todos/add', methods=['POST'])
+def add_todo():
+    try:
+        data = request.json
+        service = get_tasks_service()
+        # Get default task list
+        tasklists = service.tasklists().list().execute()
+        tasklist_id = tasklists['items'][0]['id']
+        task = {
+            'title': data['task'],
+            'notes': f"Priority: {data.get('priority', 'medium')}"
+        }
+        # Add due date if provided
+        if data.get('due_date'):
+            task['due'] = data['due_date'] + 'T00:00:00.000Z'
+        result = service.tasks().insert(
+            tasklist=tasklist_id,
+            body=task
+        ).execute()
+        return jsonify({
+            "success": True,
+            "id": result['id'],
+            "task": result['title']
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/todos/complete', methods=['POST'])
+def complete_todo():
+    try:
+        data = request.json
+        service = get_tasks_service()
+        tasklists = service.tasklists().list().execute()
+        tasklist_id = tasklists['items'][0]['id']
+        # Get task first
+        task = service.tasks().get(
+            tasklist=tasklist_id,
+            task=data['id']
+        ).execute()
+        # Mark complete
+        task['status'] = 'completed'
+        service.tasks().update(
+            tasklist=tasklist_id,
+            task=data['id'],
+            body=task
+        ).execute()
+        return jsonify({
+            "success": True,
+            "message": f"Task marked complete"
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/todos/delete', methods=['POST'])
+def delete_todo():
+    try:
+        data = request.json
+        service = get_tasks_service()
+        tasklists = service.tasklists().list().execute()
+        tasklist_id = tasklists['items'][0]['id']
+        service.tasks().delete(
+            tasklist=tasklist_id,
+            task=data['id']
+        ).execute()
+        return jsonify({
+            "success": True,
+            "message": "Task deleted"
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5050))
