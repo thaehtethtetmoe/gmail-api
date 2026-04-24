@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 gmail_token.json
 refresh_token.py
+temp_credentials.json
